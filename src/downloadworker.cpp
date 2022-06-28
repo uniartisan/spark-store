@@ -5,89 +5,12 @@
 #include <QNetworkRequest>
 #include <QNetworkReply>
 #include <QThread>
+#include <QProcess>
 #include <QRegularExpression>
 #include <QFileInfo>
 #include <QDir>
-
-DownloadWorker::DownloadWorker(QObject *parent)
-{
-    Q_UNUSED(parent)
-}
-
-void DownloadWorker::setIdentifier(int identifier)
-{
-    this->identifier = identifier;
-}
-
-void DownloadWorker::setParamter(const QString &url, QPair<qint64, qint64> range, QFile *file)
-{
-    this->url = url;
-    this->startPos = range.first;
-    this->endPos = range.second;
-    this->file = file;
-}
-
-qint64 DownloadWorker::getReceivedPos()
-{
-    return receivedPos;
-}
-
-void DownloadWorker::doWork()
-{
-    mgr = new QNetworkAccessManager(this);
-    QNetworkRequest request;
-    request.setUrl(url);
-    request.setAttribute(QNetworkRequest::FollowRedirectsAttribute, true);
-    request.setRawHeader("Range", QString("bytes=%1-%2").arg(startPos).arg(endPos).toLocal8Bit());
-    reply = mgr->get(request);
-    qDebug() << "开始下载数据：" << QString(" %1~%2 -> writePos Start %3").arg(startPos).arg(endPos).arg(receivedPos);
-
-    connect(reply, static_cast<void(QNetworkReply::*)(QNetworkReply::NetworkError) > (&QNetworkReply::error),
-            [this](QNetworkReply::NetworkError error)
-    {
-        if(error != QNetworkReply::NoError)
-        {
-            qDebug() << "出错了：" << reply->errorString();
-        }
-    });
-    connect(reply, &QNetworkReply::finished, mgr, &QNetworkAccessManager::deleteLater);
-    connect(reply, &QNetworkReply::readyRead, this, &DownloadWorker::dataReady);
-    connect(reply, &QNetworkReply::finished, this, &DownloadWorker::slotFinish);
-    connect(reply, &QNetworkReply::downloadProgress, this, &DownloadWorker::handleProcess);
-    // connect(reply, &QNetworkReply::finished, reply, &QNetworkReply::deleteLater);
-    connect(reply, &QNetworkReply::finished, this, &DownloadWorker::doStop);
-}
-
-void DownloadWorker::doStop()
-{
-    if (reply) {
-        reply->disconnect();
-        reply->aboutToClose();
-        reply->deleteLater();
-        reply = nullptr;
-    }
-}
-
-void DownloadWorker::dataReady()
-{
-    QByteArray data = reply->readAll();
-    file->seek(startPos + receivedPos);
-    file->write(data);
-    receivedPos += data.size();
-}
-
-void DownloadWorker::slotFinish()
-{
-    file->flush();
-    qDebug() << "数据块下载完毕：" << QString(" %1~%2 -> writePos Start %3").arg(startPos).arg(endPos).arg(receivedPos);
-    emit workFinished();
-}
-
-void DownloadWorker::handleProcess(qint64, qint64)
-{
-    emit this->downloadProcess();
-}
-
+#include <QElapsedTimer>
+#include <QtConcurrent>
 
 DownloadController::DownloadController(QObject *parent)
 {
@@ -106,7 +29,7 @@ DownloadController::DownloadController(QObject *parent)
         for (int i = 0; i < list.size(); i++) {
             if (list.at(i).contains("镜像源 Download only") && i + 1 < list.size()) {
                 for (int j = i + 1; j < list.size(); j++) {
-                    system("curl -I -s --connect-timeout 5 " + list.at(j).toUtf8() 
+                    system("curl -I -s --connect-timeout 5 https://" + list.at(j).toUtf8() 
                         + "/dcs-repo.gpg-key.asc -w  %{http_code}  |tail -n1 > /tmp/spark-store/cdnStatus.txt");
                     QFile cdnStatus("/tmp/spark-store/cdnStatus.txt");
                     if(cdnStatus.open(QFile::ReadOnly) && QString(cdnStatus.readAll()).toUtf8()=="200"){
@@ -118,6 +41,7 @@ DownloadController::DownloadController(QObject *parent)
             }
         }
     }
+    std::random_shuffle(domains.begin(), domains.end());
     qDebug() << domains << domains.size();
 
     /*
@@ -132,28 +56,20 @@ DownloadController::DownloadController(QObject *parent)
     this->threadNum = domains.size();
 }
 
-DownloadController::~DownloadController()
-{
-    if(workers.size() > 0)
-    {
-        for(int i = 0; i < workers.size(); i++)
-        {
-            workers.at(i)->doStop();
-            workers.at(i)->disconnect();
-            workers.at(i)->deleteLater();
-        }
-        workers.clear();
-    }
-}
+
 
 void DownloadController::setFilename(QString filename)
 {
     this->filename = filename;
 }
 
-void DownloadController::setThreadNum(int threadNum)
+
+void timeSleeper(int time)
 {
-    this->threadNum = threadNum;
+    QElapsedTimer t1;
+    t1.start();
+    while(t1.elapsed()<time);
+    return;
 }
 
 /**
@@ -161,9 +77,8 @@ void DownloadController::setThreadNum(int threadNum)
  */
 void DownloadController::startDownload(const QString &url)
 {
-    finish = 0;
 
-    // 下载任务等分，计算每个线程的下载数据
+    // 获取下载任务信息
     fileSize = getFileSize(url);
     if(fileSize == 0)
     {
@@ -171,55 +86,112 @@ void DownloadController::startDownload(const QString &url)
         return; 
     }
 
-    qint64 segmentSize = fileSize / threadNum;
-    ranges.resize(threadNum);
-    QVector<qint64> receivedBytes;
-    receivedBytes.resize(threadNum);
-    for(int i = 0; i < threadNum; i++)
-    {
-        ranges[i].first = i * segmentSize;
-        ranges[i].second = i * segmentSize + segmentSize - 1;
-        receivedBytes[i] = 0;
-    }
-    ranges[threadNum - 1].second = fileSize; // 余数部分加入最后一个
 
-    // 打开文件
-    QDir tmpdir("/tmp/spark-store");
-    file = new QFile;
-    file->setFileName(tmpdir.absoluteFilePath(filename));
+    QtConcurrent::run([=](){
+        QDir tmpdir("/tmp/spark-store/");
+        QString axelCommand = "-o";
+        QString axelUrls = "";
+        QString axelVerbose = "--verbose";
+        QStringList command;
+        QString downloadDir = "/tmp/spark-store/";
+        for(int i = 0; i < domains.size(); i ++)
+        {
+            command.append(replaceDomain(url, domains.at(i)).toUtf8());
+            axelUrls += replaceDomain(url, domains.at(i));
+            axelUrls += " ";
+        }
+        QProcess cmd;
 
-    if(file->exists())
-    {
-        file->remove();
-    }
+        command.append(axelCommand.toUtf8());
+        command.append(downloadDir.toUtf8());
+        command.append(axelVerbose.toUtf8());
+        qDebug() << command;
+        //cmd.setProgram("axel");
+        cmd.setProgram("/opt/durapps/spark-store/bin/axel/axel");
+        cmd.setArguments(command);
+        cmd.start();
+        cmd.waitForStarted();            //等待启动完成
+        qint64 downloadSizeRecord = 0;
+        QString speedInfo = "";
+        QObject::connect(&cmd,&QProcess::readyReadStandardOutput,
+                           [&](){
+            //通过读取文件大小计算下载速度
+            QFileInfo info(tmpdir.absoluteFilePath(filename));
+            QString message = cmd.readAllStandardOutput().data();
+            message = message.replace(" ","").replace("\n","").replace("..","");
+            message = message.replace(".[","[").replace("].","]");
+            if (message.size() > 2){
+                qDebug() << message;
+            }
+            QRegExp rx("[0-9.A-Z]\\d*.\\d*");
+            QStringList list;
+            int pos = 0;
+            qint64 downloadSize = 0;
+            while ((pos = rx.indexIn(message, pos)) != -1)
+            {
+                if (rx.cap(0).contains("%",Qt::CaseSensitive))
+                {
+                    QString percentInfo = rx.cap(0).replace("%","");
+                    int percentInfoNumber = percentInfo.toUInt();
+                    downloadSize = percentInfoNumber * fileSize / 100;
+                }
+                else{
+                    if (!rx.cap(0).contains("B",Qt::CaseSensitive))
+                    {
+                        speedInfo = rx.cap(0);
+                    }
+                    else{
+                        speedInfo += rx.cap(0) + "/s";
+                    }
+                }
+                pos += rx.matchedLength();
+            }
+            if(downloadSize >= downloadSizeRecord)
+            {
+                downloadSizeRecord = downloadSize;
+            }
+            emit downloadProcess(speedInfo, downloadSizeRecord, fileSize);
 
-    if(!file->open(QIODevice::WriteOnly))
-    {
-        delete file;
-        file = nullptr;
-        emit errorOccur(file->errorString());
-        return;
-    }
 
-    file->resize(fileSize);
+          });
+        QObject::connect(&cmd,&QProcess::readyReadStandardError,
+                           [&](){
+            emit errorOccur(cmd.readAllStandardError().data());
+            return;
+          });
+        
+        auto pidNumber = cmd.processId();
+        this->pidNumber = pidNumber;
+        qDebug()<< pidNumber;
+        QString pidCommand = "ps -ef| grep " + QString::number(pidNumber)
+                + "|grep -v grep|awk '{print $2}' > /tmp/spark-store/downloadStatus.txt";
+        qDebug()<< pidCommand;
+        while(true)
+        {
+            system(pidCommand.toUtf8());
+            QFile downloadStatus("/tmp/spark-store/downloadStatus.txt");
+            timeSleeper(30);
+            downloadStatus.open(QFile::ReadOnly);
+            auto temp = QString(downloadStatus.readAll()).toUtf8();
+            downloadStatus.close();
+            if (temp!=""){
+                cmd.waitForFinished();
+                continue;
+            }
+            else{
+                finished = true;
+                break;
+            }
+        }
 
-    // 创建下载线程
-    workers.clear();
-    for(int i = 0; i < ranges.size(); i++)
-    {
-        qDebug() << QString("第%1个下载请求：%2-%3").arg(i).arg(ranges.at(i).first).arg(ranges.at(i).second);
-        auto worker = new DownloadWorker(this);
-        auto range = ranges.at(i);
-        QString chunkUrl = replaceDomain(url, domains.at(i));
-        worker->setIdentifier(i);
-        worker->setParamter(chunkUrl, range, file);
-        workers.append(worker);
 
-        connect(worker, &DownloadWorker::downloadProcess, this, &DownloadController::handleProcess);
-        connect(worker, &DownloadWorker::workFinished, this, &DownloadController::chunkDownloadFinish);
 
-        worker->doWork();
-    }
+        file = new QFile;
+        file->setFileName(tmpdir.absoluteFilePath(filename));
+        qDebug() <<"finished:"<< finished;
+        emit downloadFinished();
+    });
+
 }
 
 /**
@@ -227,43 +199,13 @@ void DownloadController::startDownload(const QString &url)
  */
 void DownloadController::stopDownload()
 {
-    for(int i = 0; i < workers.size(); i++)
-    {
-        workers.at(i)->doStop();
-        workers.at(i)->disconnect();
-        workers.at(i)->deleteLater();
-    }
-    workers.clear();
-    qDebug() << "文件下载路径：" << QFileInfo(file->fileName()).absoluteFilePath();
+    // 实现下载进程退出
+    QString killCmd = QString("kill -9 %1").arg(pidNumber);
+    system(killCmd.toUtf8());
+    //qDebug()<<"kill aria2!";
 
-    file->flush();
-    file->close();
-    delete file;
-    file = nullptr;
 }
 
-
-void DownloadController::handleProcess()
-{
-    qint64 bytesReceived = 0;
-    for(int i = 0; i < workers.size(); i++)
-    {
-        bytesReceived += workers.at(i)->getReceivedPos();
-    }
-    qDebug() << QString("下载进度 %1-%2").arg(bytesReceived).arg(fileSize);
-    emit downloadProcess(bytesReceived, fileSize);
-}
-
-void DownloadController::chunkDownloadFinish()
-{
-    finish++;
-    qDebug() << QString("已下载了%1块，共%2块！！！").arg(finish).arg(threadNum);
-    if(finish == threadNum)
-    {
-        stopDownload();
-        emit downloadFinished();
-    }
-}
 
 qint64 DownloadController::getFileSize(const QString& url)
 {

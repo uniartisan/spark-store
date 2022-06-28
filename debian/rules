@@ -14,20 +14,30 @@ DH_AUTO_ARGS = --parallel --buildsystem=qmake
 
 override_dh_auto_clean:
 	rm -rf $(CURDIR)/build
+	rm -rf $(CURDIR)/build-axel
 
 override_dh_auto_configure:
 	mkdir -p $(CURDIR)/build
-
+	mkdir -p $(CURDIR)/build-axel
+	
 	dh_auto_configure MAKEFLAGS=-j$(JOBS) -- spark-store-project.pro \
 	-spec linux-g++ CONFIG+=qtquickcompiler \
 	-o $(CURDIR)/build/
 
+	cp  $(CURDIR)/third-party/axel-2.17.11.tar.gz $(CURDIR)/build-axel/
+	cd $(CURDIR)/build-axel/ && tar -xf axel-2.17.11.tar.gz
+	cd $(CURDIR)/build-axel/axel-2.17.11/ && $(CURDIR)/build-axel/axel-2.17.11/configure
+
 override_dh_auto_build:
 	make -C $(CURDIR)/build -j$(JOBS)
 
+	make -C $(CURDIR)/build-axel/axel-2.17.11/ -j$(JOBS)
 override_dh_auto_install:
 	make -C $(CURDIR)/build install \
 	INSTALL_ROOT=$(CURDIR)/debian/spark-store
+
+	mkdir -p $(CURDIR)/debian/spark-store/opt/durapps/spark-store/bin/axel/
+	cp $(CURDIR)/build-axel/axel-2.17.11/axel $(CURDIR)/debian/spark-store/opt/durapps/spark-store/bin/axel/
 
 # Ignore the dpkg-shlibdeps: warning (it uses none of the library's symbols)
 # Qt Mutidedia lib will ref to network libraray.
