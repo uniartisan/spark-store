@@ -104,7 +104,7 @@ Widget::Widget(DBlurEffectWidget *parent) :
     });
 
     // 计算显示下载速度
-    download_speed.setInterval(200);
+    download_speed.setInterval(1000);
     download_speed.start();
     connect(&download_speed,&QTimer::timeout,[=]()
     {
@@ -958,7 +958,9 @@ void Widget::httpFinished() // 完成下载
     download_list[nowDownload - 1].free = true;
     if(nowDownload < allDownload)
     {
+
         // 如果有排队则下载下一个
+        qDebug() << "切换下一个下载...";
         nowDownload += 1;
         while(download_list[nowDownload - 1].close)
         {
@@ -1328,7 +1330,7 @@ void Widget::on_webEngineView_urlChanged(const QUrl &arg1)
         ui->label_appname->clear();
         ui->pushButton_download->setEnabled(false);
         ui->stackedWidget->setCurrentIndex(2);
-        qDebug() << "https://demo-one-vert.vercel.app/" + type_name + "/" + pname;
+        qDebug() << "https://d.store.deepinos.org.cn/" + type_name + "/" + pname;
         qDebug() << "链接地址：" << arg1;
 
         /*

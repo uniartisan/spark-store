@@ -17,7 +17,7 @@ Build-Depends:
  qttools5-private-dev,
  libnotify-dev,
  qtwebengine5-dev,
- libssl-dev
+ aria2
 Standards-Version: 3.0
 Homepage: https://www.spark-app.store/
 
@@ -36,7 +36,8 @@ Depends:${shlibs:Depends}, ${misc:Depends},
  libnotify4,
  curl,
  dde-qt5integration,
- bubblewrap
+ bubblewrap,
+ aria2
 Description: Spark Store
  A community powered app store, based on DTK.
 Recommends: apt-fast
