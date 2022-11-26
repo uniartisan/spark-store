@@ -11,9 +11,9 @@ Build-Depends:
  libqt5widgets5,
  libqt5network5,
  libqt5concurrent5,
- libdtkcore-dev(>=5.2),
- libdtkgui-dev(>=5.2),
- libdtkwidget-dev(>=5.2),
+ libdtkcore-dev(>=5.0),
+ libdtkgui-dev(>=5.0),
+ libdtkwidget-dev(>=5.0),
  qttools5-private-dev,
  libnotify-dev,
  qtwebengine5-dev
@@ -34,9 +34,13 @@ Depends:${shlibs:Depends}, ${misc:Depends},
  libdtkwidget5,
  libnotify4,
  curl,
+ openssl,
+ libssl-dev,
  dde-qt5integration,
  bubblewrap,
- aria2
+ aria2,
+ gcc,
+ zenity
 Description: Spark Store
  A community powered app store, based on DTK.
 Recommends: apt-fast

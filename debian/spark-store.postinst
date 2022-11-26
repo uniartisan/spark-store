@@ -2,6 +2,21 @@
 
 case "$1" in
 	configure)
+
+	# Enable i386 arch
+	echo "Enable i386 arch..."
+	dpkg --add-architecture i386
+
+        # config for aptss
+        mkdir -p /etc/aptss/sources.list.d
+        ln -s -f /etc/apt/sources.list /etc/aptss/sources.list
+
+	#  Remove the sources.list file
+	if [ -e /etc/apt/sources.list.d/sparkstore.list ];then
+	rm /etc/apt/sources.list.d/sparkstore.list
+	fi
+        
+
 		# Check if /usr/local/bin existed
 		mkdir -p /usr/local/bin
 
@@ -11,20 +26,26 @@ case "$1" in
 		ln -s -f /opt/durapps/spark-store/bin/spark-store /usr/local/bin/spark-store
 		ln -s -f /opt/durapps/spark-store/bin/ssinstall /usr/local/bin/ssinstall
 		ln -s -f /opt/durapps/spark-store/bin/spark-dstore-patch /usr/local/bin/spark-dstore-patch
-		ln -s -f /opt/durapps/spark-store/bin/ss-apt-fast /usr/local/bin/ss-apt-fast
+		ln -s -f /opt/durapps/spark-store/bin/aptss /usr/local/bin/ss-apt-fast
+		
+     	       ln -s -f /opt/durapps/spark-store/bin/aptss /usr/bin/aptss
 
+		# Compile the Sender module
 
+		gcc /opt/durapps/spark-store/bin/ss-feedback/sender-d.sh.c -o /opt/durapps/spark-store/bin/ss-feedback/sender-d
 
-		# Download and install key
-		wget -O /tmp/spark-store-install/spark-store.asc https://d.store.deepinos.org.cn/dcs-repo.gpg-key.asc 
-		gpg --dearmor /tmp/spark-store-install/spark-store.asc 
+		# Install key
+		mkdir -p /tmp/spark-store-install/
+		cp -f /opt/durapps/spark-store/bin/spark-store.asc  /tmp/spark-store-install/spark-store.asc
+		gpg --dearmor /tmp/spark-store-install/spark-store.asc
 		cp -f /tmp/spark-store-install/spark-store.asc.gpg /etc/apt/trusted.gpg.d/spark-store.gpg
 
-        	# Run apt update to avoid users being fucked up by the non-exist dependency problem
-        	apt update -o Dir::Etc::sourcelist="sources.list.d/sparkstore.list"     -o Dir::Etc::sourceparts="-" -o APT::Get::List-Cleanup="0"
 
-		# Create symbo links to start upgrade detect
-		ln -s /opt/durapps/spark-store/bin/update-upgrade/autostart/spark-update-notifier.desktop /etc/xdg/autostart/spark-update-notifier.desktop
+
+        	# Run apt update to avoid users being fucked up by the non-exist dependency problem
+		# Now abandoned as aptss now run ssupdate everytime
+		#aptss ssupdate
+
 
 		# Start upgrade detect service
 		systemctl enable spark-update-notifier
@@ -42,6 +63,8 @@ case "$1" in
 
 		# Remove temp dir
 		rm -rf /tmp/spark-store-install
+
+
 	;;
 
 	triggered)

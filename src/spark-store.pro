@@ -4,7 +4,7 @@
 #
 #-------------------------------------------------
 
-QT       += core gui network concurrent webenginewidgets
+QT       += core gui network concurrent webenginewidgets dbus
 
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 
@@ -41,7 +41,10 @@ SOURCES += \
     main.cpp \
     progressload.cpp \
     widget.cpp \
-    workerthreads.cpp
+    workerthreads.cpp \
+    dbus/dbussparkstore.cpp \
+    webengine/webenginepage.cpp \
+    webengine/webengineview.cpp
 
 HEADERS += \
     appitem.h \
@@ -52,7 +55,10 @@ HEADERS += \
     image_show.h \
     progressload.h \
     widget.h \
-    workerthreads.h
+    workerthreads.h \
+    dbus/dbussparkstore.h \
+    webengine/webenginepage.h \
+    webengine/webengineview.h
 
 FORMS += \
     appitem.ui \

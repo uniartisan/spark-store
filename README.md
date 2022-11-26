@@ -11,9 +11,14 @@ All packages will be shared in our repository for users to get freely.
 
 Distrobution supported：Deepin 20 ; Ubuntu 22.04 LTS / Ubuntu 20.04 LTS(May stop support in the future） ; UniontechOS Home 21
 
+*About OpenKylin and deepin 23*
+
+The adaptation work is scheduled after their official release.
+
+You can track our Issue resoving progress here  https://gitee.com/deepin-community-store/spark-store/board
 
 
-I hope people who see here can also join our team，development help or submit applications are welcomed
+We hope people who see here can also join our team，development help or submit applications are welcomed
 
 If you want to submit an APP to share with others，Please [Click here](https://upload.deepinos.org/index)
 
@@ -22,7 +27,7 @@ If you want to submit an APP to share with others，Please [Click here](https://
 
 If you simply want to install the Spark Store,just enter the  [Release] page, find the version you want and install.
 
-If you are using Debian11/Ubuntu 20.04, you will need extra dependency package. Available [here](https://d.store.deepinos.org.cn/spark-store-dependencies-kylin.zip)
+If you are using Debian11/Ubuntu 20.04, you will need extra dependency package. Available [here](https://code.gitlink.org.cn/shenmo7192/spark-store-dependencies/raw/branch/master/spark-store-dependencies-kylin.zip)
 
 ---
 #### Compile and developement
@@ -56,3 +61,13 @@ dpkg-buildpackage
 We use Gitee as our code hosting platform. Please click here to contact us. 
 
 https://gitee.com/deepin-community-store/spark-store
+
+### Rocket Chat
+
+https://chat.shenmo.tech/
+
+PWA Client：
+
+spk://store/chat/store.spark-app.feedback
+
+（Copy and paste to search bar or in browser address bar after installing Spark Store）

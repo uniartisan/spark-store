@@ -13,8 +13,29 @@ void SpkAppInfoLoaderThread::run()
     emit requestResetUi();
 
     httpClient = new AeaQt::HttpClient;
+    QString oriSeverUrl = "https://d.store.deepinos.org.cn";
+    QString cdnSeverUrl = "https://cdn.d.store.deepinos.org.cn";
 
-    httpClient->get(targetUrl.toString())
+    QString downloadTimesUrl = targetUrl.toString();
+    downloadTimesUrl = downloadTimesUrl.replace(oriSeverUrl, cdnSeverUrl);
+    downloadTimesUrl = downloadTimesUrl.replace("app.json", "download-times.txt");
+    httpClient->get(downloadTimesUrl)
+            .onResponse([this](QString downloadTimesFeedback)
+    {
+        qDebug() << "请求应用下载量信息 " << downloadTimesFeedback;
+        this->downloadTimes = downloadTimesFeedback.replace("\n","");
+    })
+    .onError([this](QString errorStr)
+    {
+        qDebug() << "请求下载量失败:" << errorStr;
+        this->downloadTimes  = "0";
+    })
+    .block()
+            .timeout(3*1000)
+            .exec();
+
+
+    httpClient->get(targetUrl.toString().replace(oriSeverUrl, cdnSeverUrl))
             .header("content-type", "application/json")
             .onResponse([this](QByteArray json_array)
     {
@@ -29,8 +50,12 @@ void SpkAppInfoLoaderThread::run()
 
         QString deburl = serverUrl;
         deburl = deburl.left(urladdress.length() - 1);
-        urladdress = "https://d.store.deepinos.org.cn/";  // 使用图片专用服务器请保留这行，删除后将使用源服务器
-        urladdress = urladdress.left(urladdress.length() - 1);
+        
+        QStringList url_ = targetUrl.toString().replace("//", "/").split("/");
+        urladdress = "https://" + url_[1];
+        // 使用 cdn 服务器
+        urladdress = "https://cdn.d.store.deepinos.org.cn";  // 使用图片专用服务器请保留这行，删除后将使用源服务器
+
 
         for(int i = 3; i < downloadurl.size(); i++)
         {
@@ -60,13 +85,14 @@ void SpkAppInfoLoaderThread::run()
         }
         details += tr("Contributor: ") + json["Contributor"].toString() + "\n";
         details += tr("Update Time: ") + json["Update"].toString() + "\n";
-        details += tr("Installed Size: ") + json["Size"].toString() + "\n";
+        details += tr("Installed Size: ") + json["Size"].toString() + "\n\n";
+        details += tr("Download Times: ") + this->downloadTimes + "\n";
         more = json["More"].toString();
 
         QProcess isInstall;
         packagename = json["Pkgname"].toString();
         isInstall.start("dpkg -s " + json["Pkgname"].toString());
-        isInstall.waitForFinished();
+        isInstall.waitForFinished(180); // 默认超时 3 分钟
         int error = QString::fromStdString(isInstall.readAllStandardError().toStdString()).length();
         if(error == 0)
         {
@@ -74,12 +100,12 @@ void SpkAppInfoLoaderThread::run()
 
             QProcess isUpdate;
             isUpdate.start("dpkg-query --showformat='${Version}' --show " + json["Pkgname"].toString());
-            isUpdate.waitForFinished();
+            isUpdate.waitForFinished(180); // 默认超时 3 分钟
             QString localVersion = isUpdate.readAllStandardOutput();
             localVersion.replace("'", "");
 
             isUpdate.start("dpkg --compare-versions " + localVersion + " ge " + json["Version"].toString());
-            isUpdate.waitForFinished();
+            isUpdate.waitForFinished(180); // 默认超时 3 分钟
             if(!isUpdate.exitCode())
             {
                 isUpdated = true;

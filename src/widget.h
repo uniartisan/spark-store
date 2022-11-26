@@ -43,7 +43,6 @@ class DownloadController;
 namespace AeaQt {
 class HttpClient;
 }
-
 class Widget : public DBlurEffectWidget
 {
     Q_OBJECT
@@ -65,6 +64,7 @@ public:
     static void sendNotification(const QString &message, const int msTimeout = 5000, const QString &icon = "spark-store");
     static void sendNotification(const char *message, const int msTimeout = 5000, const QString &icon = "spark-store");
 
+    void initDbus();
 private slots:
 
     void httpFinished();
@@ -82,6 +82,7 @@ private slots:
     void sltAppinfoScreenshot(QPixmap *picture, int index);
     void sltAppinfoFinish();
 
+    void clearSearchApp(); // 清除搜索的APP信息
     void displaySearchApp(QJsonArray array); // 展示搜索的APP信息
     void downloadIconsFinished(int arraysize); // 当前搜索列表图标是否下载完成
 
@@ -92,6 +93,7 @@ private slots:
     void on_pushButton_updateApt_clicked();
     void on_pushButton_uninstall_clicked();
     void on_pushButton_clear_clicked();
+    void on_pushButton_clearWebCache_clicked();
     void on_pushButton_website_clicked();
     void on_pushButton_clicked();
     void on_btn_openDir_clicked();
@@ -103,8 +105,12 @@ private slots:
     void on_pushButton_refresh_clicked();
     void on_pushButton_update_clicked();
 
+    //接受来自dbus的url
+    void onGetUrl(const QString &url);
+
   public:
     QUrl url;
+    QString cdnSeverUrl;
 
     downloadlist download_list[LIST_MAX];
     Ui::Widget *ui;
@@ -125,8 +131,9 @@ private:
     void initConfig();
     void chooseLeftMenu(int index);
     void setfoot(int);
-    void updatefoot();
+    // void updatefoot();
     void updateUI();
+    void closeEvent(QCloseEvent *event);
 
     quint64 dirFileSize(const QString &path);
 

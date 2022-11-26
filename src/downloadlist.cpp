@@ -45,18 +45,18 @@ downloadlist::downloadlist(QWidget *parent) :
         menu_install->addAction(action_dpkg);
     }
 
-    QFile deepin("/usr/bin/deepin-deb-installer");
-    deepin.open(QIODevice::ReadOnly);
-    if(deepin.isOpen())
-    {
-        menu_install->addAction(action_deepin);
-    }
-    QFile gdebi("/usr/bin/gdebi");
-    gdebi.open(QIODevice::ReadOnly);
-    if(gdebi.isOpen())
-    {
-        menu_install->addAction(action_gdebi);
-    }
+//    QFile deepin("/usr/bin/deepin-deb-installer");
+//    deepin.open(QIODevice::ReadOnly);
+//    if(deepin.isOpen())
+//    {
+//        menu_install->addAction(action_deepin);
+//    }
+//    QFile gdebi("/usr/bin/gdebi");
+//    gdebi.open(QIODevice::ReadOnly);
+//    if(gdebi.isOpen())
+//    {
+//        menu_install->addAction(action_gdebi);
+//    }
     
 }
 
@@ -151,7 +151,7 @@ void downloadlist::install(int t)
 
             bool haveError = false;
             bool notRoot = false;
-            installer.waitForFinished();
+            installer.waitForFinished(-1); // 不设置超时
             out = installer.readAllStandardOutput();
 
             QStringList everyOut = out.split("\n");
@@ -169,7 +169,7 @@ void downloadlist::install(int t)
 
             QProcess isInstall;
             isInstall.start("dpkg -s " + pkgName);
-            isInstall.waitForFinished();
+            isInstall.waitForFinished(180); // 默认超时 3 分钟
             int error = QString::fromStdString(isInstall.readAllStandardError().toStdString()).length();
             if(error == 0)
             {
@@ -219,6 +219,7 @@ void downloadlist::on_pushButton_3_clicked()
 {
     textbrowser->setLineWidth(0);
     textbrowser->setText(out);
+    textbrowser->setMinimumHeight(500);
 
     output_w->setMinimumHeight(600);
     output_w->setAttribute(Qt::WA_TranslucentBackground);

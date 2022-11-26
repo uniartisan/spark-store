@@ -18,6 +18,7 @@
 #include <QSettings>
 #include <QGraphicsOpacityEffect>
 #include <QtConcurrent> // 并发
+#include <QCloseEvent>  // close event
 
 #include <DApplication>
 #include <DGuiApplicationHelper>
@@ -32,6 +33,7 @@
 #include "HttpClient.h"
 #include "downloadworker.h"
 
+#include "./dbus/dbussparkstore.h"
 DWIDGET_USE_NAMESPACE
 
 Widget::Widget(DBlurEffectWidget *parent) :
@@ -61,7 +63,8 @@ Widget::Widget(DBlurEffectWidget *parent) :
     connect(ui->menu_system, &QPushButton::clicked, this, [=](){Widget::chooseLeftMenu(10);});
     connect(ui->menu_theme, &QPushButton::clicked, this, [=](){Widget::chooseLeftMenu(11);});
     connect(ui->menu_other, &QPushButton::clicked, this, [=](){Widget::chooseLeftMenu(12);});
-    connect(ui->menu_download, &QPushButton::clicked, this, [=](){Widget::chooseLeftMenu(13);});
+    connect(ui->menu_upgrade, &QPushButton::clicked, this, [=](){Widget::chooseLeftMenu(13);});
+    connect(ui->menu_download, &QPushButton::clicked, this, [=](){Widget::chooseLeftMenu(14);});
 
     connect(DGuiApplicationHelper::instance(), &DGuiApplicationHelper::themeTypeChanged, this, [=](DGuiApplicationHelper::ColorType themeType)
     {
@@ -94,7 +97,7 @@ Widget::Widget(DBlurEffectWidget *parent) :
     connect(searchEdit, &DSearchEdit::returnPressed, this, [=]()
     {
         qDebug() << "触发了搜索，呜啦啦啦!";
-        QString searchtext = searchEdit->text();
+        QString searchtext = searchEdit->text().replace("\r","");
         if(!searchtext.isEmpty())
         {
             qDebug() << searchEdit->text();
@@ -137,6 +140,9 @@ Widget::Widget(DBlurEffectWidget *parent) :
     });
 
     notify_init(tr("Spark\\ Store").toLocal8Bit());
+
+    //初始化dbus服务
+    initDbus();
 }
 
 Widget::~Widget()
@@ -154,7 +160,7 @@ void Widget::initUI()
 {
     // ui初始化
     setMaskAlpha(200);
-    ui->webfoot->setFixedHeight(0);
+    // ui->webfoot->setFixedHeight(0);
     ui->stackedWidget->setCurrentIndex(0);
     ui->listWidget->hide();
     ui->label_setting1->hide();
@@ -192,6 +198,7 @@ void Widget::initUI()
 
     // 添加菜单项
     QAction *actionSubmission = new QAction(tr("Submit App"), this);
+    QAction *actionSubmissionWithClient = new QAction(tr("Submit App with client(Recommanded)"), this);
     QAction *setting = new QAction(tr("Settings"));
     QAction *upgrade = new QAction(tr("APP Upgrade and Install Settings"));
 
@@ -199,12 +206,30 @@ void Widget::initUI()
     menu->addAction(setting);
     menu->addAction(upgrade);
     menu->addAction(actionSubmission);
+    menu->addAction(actionSubmissionWithClient);
 
     titlebar->setMenu(menu);
 
     connect(actionSubmission, &QAction::triggered, this, [=]{QDesktopServices::openUrl(QUrl("https://upload.deepinos.org/"));});
     connect(setting, &QAction::triggered, this, &Widget::opensetting);
-    connect(upgrade, &QAction::triggered, this, [=]{QProcess::startDetached("x-terminal-emulator -e /opt/durapps/spark-store/bin/update-upgrade/ss-update-controler.sh");});
+    connect(upgrade, &QAction::triggered, this, [=]{QProcess::startDetached("/opt/durapps/spark-store/bin/update-upgrade/ss-update-controler.sh");});
+
+    // 投稿器
+    connect(actionSubmissionWithClient, &QAction::triggered, this, [=]
+        {
+            QString submitterSpk = "spk://store/tools/spark-store-submitter";
+            QFile actionSubmissionClientStatus("/opt/spark-store-submitter/bin/spark-store-submitter");
+            if (actionSubmissionClientStatus.exists())
+            {
+                qDebug() << "投稿器存在";
+                QProcess::startDetached("/opt/spark-store-submitter/bin/spark-store-submitter"); 
+            }
+            else{
+                qDebug() << "投稿器不存在，跳转页面";
+                openUrl(submitterSpk);
+            }
+                
+        });
 
     // 载入自定义字体
     int loadedFontID = QFontDatabase::addApplicationFont(":/fonts/fonts/hksnzt.ttf");
@@ -231,7 +256,8 @@ void Widget::initUI()
     left_list[10] = ui->menu_system;
     left_list[11] = ui->menu_theme;
     left_list[12] = ui->menu_other;
-    left_list[13] = ui->menu_download;
+    left_list[13] = ui->menu_upgrade;
+    left_list[14] = ui->menu_download;
 
     ui->label_show->hide();
 
@@ -292,18 +318,20 @@ void Widget::initConfig()
 
     // 读取服务器URL并初始化菜单项的链接
     QSettings readConfig(QDir::homePath() + "/.config/spark-store/config.ini", QSettings::IniFormat);
-    if(!readConfig.value("server/choose").toString().isEmpty())
+    if(!readConfig.value("server/choose").toString().isEmpty() && readConfig.value("server/updated").toString() == "TRUE")
     {
         ui->comboBox_server->setCurrentText(readConfig.value("server/choose").toString());
         appinfoLoadThread.setServer(serverUrl = readConfig.value("server/choose").toString());
     }
     else
     {
-        appinfoLoadThread.setServer(serverUrl = "https://d.store.deepinos.org.cn/");  // 默认URL
+        this->cdnSeverUrl = "https://cdn.d.store.deepinos.org.cn/";
+        appinfoLoadThread.setServer(serverUrl = this->cdnSeverUrl);  // 默认URL
     }
     configCanSave = true;   //　防止触发保存配置信号
 
     // menuUrl[0] = "http://127.0.0.1:8000/#/darkprogramming";
+    qDebug() << "serverUrl: " << serverUrl;
     menuUrl[0] = serverUrl + "store/#/";
     menuUrl[1] = serverUrl + "store/#/network";
     menuUrl[2] = serverUrl + "store/#/relations";
@@ -321,7 +349,7 @@ void Widget::initConfig()
     // web控件初始化
     // ui->webView->page()->setLinkDelegationPolicy(QWebPage::DelegateAllLinks);    // 用来激活接受 linkClicked 信号
     // ui->webView->page()->settings()->setAttribute(QWebSettings::JavascriptEnabled, true);
-    ui->webfoot->hide();
+    // ui->webfoot->hide();
 
     // 初始化首页
     // ui->webEngineView->setUrl(menuUrl[0]);
@@ -359,7 +387,7 @@ void Widget::setTheme(bool isDark, QColor color)
         // 黑色模式
         themeIsDark = true;
         ui->webEngineView->setStyleSheet("background-color: #252525;");
-        ui->webfoot->setStyleSheet("background-color: #252525;");
+        // ui->webfoot->setStyleSheet("background-color: #252525;");
         ui->btn_openDir->setStyleSheet("color: #AFAFAF; background-color: #2C2C2C; border: 0px;");
         ui->label->setStyleSheet("background-color: #252525;");
         // ui->scrollArea->setStyleSheet("background-color: #2C2C2C;");
@@ -372,7 +400,7 @@ void Widget::setTheme(bool isDark, QColor color)
         // 亮色模式
         themeIsDark = false;
         ui->webEngineView->setStyleSheet("background-color: #FFFFFF;");
-        ui->webfoot->setStyleSheet("background-color: #FFFFFF;");
+        // ui->webfoot->setStyleSheet("background-color: #FFFFFF;");
         ui->btn_openDir->setStyleSheet("color: #505050; background-color: #F8F8F8; border: 0px;");
         ui->label->setStyleSheet("background-color: #FFFFFF;");
         // ui->scrollArea->setStyleSheet("background-color: #F8F8F8;");
@@ -430,6 +458,15 @@ void Widget::sendNotification(const char *message, const int msTimeout, const QS
     notify_notification_show(_notify, nullptr);
 }
 
+void Widget::initDbus()
+{
+    DBusSparkStoreService *dbusInter = new DBusSparkStoreService(this);
+
+    QDBusConnection::sessionBus().registerService("com.gitee.spark.store");
+    QDBusConnection::sessionBus().registerObject("/com/gitee/spark/store", "com.gitee.spark.store", this);
+    connect(dbusInter,&DBusSparkStoreService::sigOpenUrl,this,&Widget::onGetUrl);
+}
+
 void Widget::updateUI()
 {
     if(themeIsDark)
@@ -447,7 +484,8 @@ void Widget::updateUI()
         left_list[10]->setIcon(QIcon(":/icons/icons/category_system_dark.svg"));
         left_list[11]->setIcon(QIcon(":/icons/icons/theme-symbolic_dark.svg"));
         left_list[12]->setIcon(QIcon(":/icons/icons/category_others_dark.svg"));
-        left_list[13]->setIcon(QIcon(":/icons/icons/downloads-symbolic_dark.svg"));
+        left_list[13]->setIcon(QIcon(":/icons/icons/upgrades-symbolic_dark.svg"));
+        left_list[14]->setIcon(QIcon(":/icons/icons/downloads-symbolic_dark.svg"));
     }
     else
     {
@@ -464,10 +502,11 @@ void Widget::updateUI()
         left_list[10]->setIcon(QIcon(":/icons/icons/category_system.svg"));
         left_list[11]->setIcon(QIcon(":/icons/icons/theme-symbolic.svg"));
         left_list[12]->setIcon(QIcon(":/icons/icons/category_others.svg"));
-        left_list[13]->setIcon(QIcon(":/icons/icons/downloads-symbolic.svg"));
+        left_list[13]->setIcon(QIcon(":/icons/icons/upgrades-symbolic.svg"));
+        left_list[14]->setIcon(QIcon(":/icons/icons/downloads-symbolic.svg"));
     }
 
-    for(int i = 0; i < 14; i++)
+    for(int i = 0; i < 15; i++)
     {
         /* 设置左侧菜单字体
          * QFont temp = font;
@@ -475,6 +514,9 @@ void Widget::updateUI()
          * left_list[i]->setFont(temp);
          */
 
+        QFont temp;
+        temp.setFamily(temp.defaultFamily());
+        left_list[i]->setFont(temp);
         left_list[i]->setFixedHeight(38);
         if(themeIsDark)
         {
@@ -552,7 +594,10 @@ void Widget::updateUI()
         left_list[12]->setIcon(QIcon(":/icons/icons/category_others_dark.svg"));
         break;
     case 13:
-        left_list[13]->setIcon(QIcon(":/icons/icons/downloads-symbolic_dark.svg"));
+        left_list[13]->setIcon(QIcon(":/icons/icons/upgrades-symbolic_dark.svg"));
+        break;
+    case 14:
+        left_list[14]->setIcon(QIcon(":/icons/icons/downloads-symbolic_dark.svg"));
         break;
     }
 }
@@ -570,14 +615,14 @@ void Widget::chooseLeftMenu(int index)
 
     updateUI();
 
-    if(index <= 12)
+    if (index <= 12)
     {
-        if(themeIsDark)
+        if (themeIsDark)
         {
             QString darkurl = menuUrl[index].toString();
             QStringList list = darkurl.split("/");
             darkurl.clear();
-            for(int i = 0; i < list.size() - 1; i++)
+            for (int i = 0; i < list.size() - 1; i++)
             {
                 darkurl += list[i] + "/";
             }
@@ -592,6 +637,18 @@ void Widget::chooseLeftMenu(int index)
 
         ui->stackedWidget->setCurrentIndex(0);
     }
+    else if (index == 13){
+        QFile upgradeStatus("/tmp/spark-store/upgradeStatus.txt");
+        if (!upgradeStatus.exists()){
+            QtConcurrent::run([=]{
+                auto upgradeP = new QProcess();
+                upgradeP->startDetached("/opt/durapps/spark-store/bin/update-upgrade/ss-do-upgrade.sh");
+                upgradeP->waitForStarted();
+                upgradeP->waitForFinished(-1);
+            });
+        }
+        ui->stackedWidget->setCurrentIndex(0);
+    }
     else
     {
         ui->stackedWidget->setCurrentIndex(1);
@@ -603,15 +660,15 @@ void Widget::setfoot(int h)
     foot = h;
 }
 
-void Widget::updatefoot()
-{
-    int allh = ui->stackedWidget->height();
-    ui->webfoot->setFixedHeight(allh - foot);
-}
+//void Widget::updatefoot()
+//{
+//    int allh = ui->stackedWidget->height();
+//    ui->webfoot->setFixedHeight(allh - foot);
+//}
 
 void Widget::on_pushButton_download_clicked()
 {
-    chooseLeftMenu(13);
+    chooseLeftMenu(14);
 
     allDownload += 1;
 
@@ -685,48 +742,60 @@ void Widget::searchApp(QString text)
     }
     else
     {
-        // sendNotification(tr("Spark store could only process spk:// links for now. The search feature is coming soon!"));
-        // ui->webView->setUrl(QUrl("http://www.baidu.com/s?wd="+text));    // 这东西对接百度
-        // ui->stackedWidget->setCurrentIndex(0);
-
         // 禁止同时进行多次搜索
-        if(!mutex.tryLock())
+        if (!mutex.tryLock())
         {
+            qDebug() << "Do not repeat searches！";
+            sendNotification(tr("Do not repeat searches!"));
             return;
         }
 
+        //加载动画
+        spinner->show();
+        spinner->start();
+
         // 关键字搜索处理
         httpClient->get("https://search.deepinos.org.cn/appinfo/search")
-                .header("content-type", "application/json")
-                .queryParam("keyword", text)
-                .onResponse([this](QByteArray result)
-        {
+            .header("content-type", "application/json")
+            .queryParam("keyword", text)
+            .onResponse([this](QByteArray result)
+                        {
             auto json = QJsonDocument::fromJson(result).array();
             if (json.empty())
             {
                 qDebug() << "相关应用未找到！";
                 sendNotification(tr("Relative apps Not Found!"));
                 mutex.unlock();
+                clearSearchApp();
+                spinner->stop();
+                spinner->hide();
+                ui->stackedWidget->setCurrentIndex(0);
+                ui->webEngineView->setUrl(QUrl("https://wayou.github.io/t-rex-runner"));
                 return;
             }
-            displaySearchApp(json);
-        })
-        .onError([this](QString errorStr)
-        {
+            clearSearchApp();
+            displaySearchApp(json); })
+            .onError([this](QString errorStr)
+                     {
             qDebug()  << "请求出错：" << errorStr;
             sendNotification(QString(tr("Request Error: %1")).arg(errorStr));
             mutex.unlock();
-            return;
-        })
-        .timeout(10 * 1000)
-                .exec();
+            return; })
+            .timeout(10 * 1000)
+            .exec();
     }
 }
 
+void Widget::closeEvent(QCloseEvent *event)
+{
+    mutex.unlock();
+    httpClient->deleteLater();
+}
+
 /**
- * @brief 展示搜索的APP信息
+ * @brief 清除搜索的APP信息
  */
-void Widget::displaySearchApp(QJsonArray array)
+void Widget::clearSearchApp()
 {
     ui->stackedWidget->setCurrentIndex(4);
 
@@ -741,13 +810,20 @@ void Widget::displaySearchApp(QJsonArray array)
     }
 
     main->removeItem(applist_grid);
-    spinner->show();
-    spinner->start();
+}
+/**
+ * @brief 展示搜索的APP信息
+ */
+void Widget::displaySearchApp(QJsonArray array)
+{
+    
+    
 
     for(int i = 0; i < array.size(); i++)
     {
         QJsonObject appInfo = array.at(i).toObject();
         AppItem *appItem = new AppItem(this);
+        appItem->setAttribute(Qt::WA_DeleteOnClose);
         QString url = QString("spk://store/%1/%2")
                 .arg(appInfo["category_slug"].toString())
                 .arg(appInfo["pkgname"].toString());
@@ -1026,11 +1102,14 @@ void Widget::on_comboBox_server_currentIndexChanged(const QString &arg1)
 {
     appinfoLoadThread.setServer(arg1);  // 服务器信息更新
 
+    const QString updatedInfo = "TRUE";
     if(configCanSave)
     {
         // ui->label_setting1->show();
         QSettings *setConfig = new QSettings(QDir::homePath() + "/.config/spark-store/config.ini", QSettings::IniFormat);
         setConfig->setValue("server/choose", arg1);
+        setConfig->setValue("server/updated", updatedInfo);
+        setConfig->deleteLater();
     }
 }
 
@@ -1086,77 +1165,13 @@ void Widget::on_pushButton_updateApt_clicked()
         ui->pushButton_updateApt->setEnabled(false);
         ui->label_aptserver->setText(tr("Updating, please wait..."));
 
-        std::fstream sourcesList, policy, update;
-        QDir tmpdir("/tmp");
-        auto tmpPath = QString::fromUtf8(TMP_PATH).toStdString();
-        bool unknownError = true;
-
-        tmpdir.mkpath("spark-store");
-        sourcesList.open(tmpPath + "/sparkstore.list", std::ios::out);
-        // 商店已经下架会替换系统库的包，优先级 policy 弃用
-        // policy.open(tmpPath + "/sparkstore", std::ios::out);
-
-        if(sourcesList /*&& policy*/)
-        {
-            auto serverAddr = ui->comboBox_server->currentText();
-
-            sourcesList << "deb [by-hash=force] ";
-            sourcesList << serverAddr.toUtf8().toStdString();
-            sourcesList << " /";
-            sourcesList.close();
-
-            /*
-             * policy << "Package: *\n" << "Pin: origin *" <<
-             * serverAddr.mid(serverAddr.indexOf('.')).toUtf8().toStdString() << "\n" <<
-             * "Pin-Priority: 90"; // 降低星火源的优先级，防止从星火安装已存在的系统包，破坏依赖
-             * policy.close();
-           */
-
-            update.open(tmpPath + "/update.sh", std::ios::out);
-            if(update)
-            {
-                unknownError = false;
-                update << "#!/bin/sh\n" <<
-                          "mv " + tmpPath + "/sparkstore.list /etc/apt/sources.list.d/sparkstore.list && " <<
-                          // "mv " + tmpPath + "/sparkstore /etc/apt/preferences.d/sparkstore && " <<
-                          "apt update";
-                update.close();
-
-                system(("chmod +x " + tmpPath + "/update.sh").c_str());
-
-                QProcess runupdate;
-                runupdate.start("pkexec", QStringList() << QString::fromStdString(tmpPath + "/update.sh"));
-                runupdate.waitForFinished();
-                QString error = runupdate.readAllStandardError();
-
-                QStringList everyError = error.split("\n");
-                bool haveError = false;
-                for(int i = 0; i < everyError.size(); i++)
-                {
-                    if(everyError[i].left(2) == "E:")
-                    {
-                        haveError = true;
-                    }
-                }
-
-                if(!haveError)
-                {
-                    ui->label_aptserver->setText("deb [by-hash=force] " + ui->comboBox_server->currentText().toUtf8() + " /");
-                }
-                else
-                {
-                    ui->label_aptserver->setText(tr("Apt has reported an error. Please use apt update in terminal to locate the problem."));
-                }
-            }
-        }
-
-        if(unknownError)
-        {
-            ui->label_aptserver->setText(tr("Unknown error!"));
-        }
+        QString storeSpk = "spk://store/tools/spark-store";
+        openUrl(storeSpk);
+        ui->label_aptserver->setText(tr(""));
 
         ui->pushButton_updateApt->setEnabled(true);
-    });
+      });
+
 }
 
 void Widget::on_pushButton_uninstall_clicked()
@@ -1168,11 +1183,11 @@ void Widget::on_pushButton_uninstall_clicked()
 
         QProcess uninstall;
         uninstall.start("pkexec", QStringList() << "apt" << "purge" << "-y" << pkgName.toLower());
-        uninstall.waitForFinished();
+        uninstall.waitForFinished(-1); // 默认无限时长
 
         QProcess check;
         check.start("dpkg", QStringList() << "-s" << pkgName.toLower());
-        check.waitForFinished();
+        check.waitForFinished(180); // 默认超时 3 分钟
 
         if (check.readAllStandardOutput().isEmpty())
         {
@@ -1206,6 +1221,16 @@ void Widget::on_pushButton_clear_clicked()  // 清空临时缓存目录
         ui->pushButton_clear->setEnabled(true);
         Widget::opensetting();
     });
+}
+
+void Widget::on_pushButton_clearWebCache_clicked()
+{
+    QtConcurrent::run([=]()
+                      {
+
+        QString dataLocal = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+        QDir cacheDir(dataLocal );
+        cacheDir.removeRecursively(); });
 }
 
 quint64 Widget::dirFileSize(const QString &path)
@@ -1308,13 +1333,16 @@ void Widget::on_stackedWidget_currentChanged(int arg1)
 void Widget::on_webEngineView_urlChanged(const QUrl &arg1)
 {
     //分析出服务器中的分类名称
-    QStringList url_ = arg1.path().split("/");
+    QStringList url_ = arg1.path().replace("//", "/").split("/");
     QString pname;
-    if(url_.size() > 3)
+    qDebug() << "URL size:" << url_.size();
+    if (url_.size() > 3)
     {
         type_name = url_[2];
         pname = url_[3];
     }
+    qDebug() << "type_name:" << type_name << ";pname" << pname;
+
     //如果是app.json就打开详情页
     if(arg1.path().right(8) == "app.json")
     {
@@ -1328,8 +1356,9 @@ void Widget::on_webEngineView_urlChanged(const QUrl &arg1)
         ui->label_appname->clear();
         ui->pushButton_download->setEnabled(false);
         ui->stackedWidget->setCurrentIndex(2);
-        qDebug() << "https://d.store.deepinos.org.cn/" + type_name + "/" + pname;
-        qDebug() << "链接地址：" << arg1;
+        
+        qDebug() << "程序跳转链接地址：" << arg1;
+        QString url = arg1.toString();
 
         /*
         load.cancel();  // 打开并发加载线程前关闭正在执行的线程
@@ -1340,7 +1369,7 @@ void Widget::on_webEngineView_urlChanged(const QUrl &arg1)
         */
         appinfoLoadThread.requestInterruption();
         appinfoLoadThread.wait(100);
-        appinfoLoadThread.setUrl(arg1);
+        appinfoLoadThread.setUrl(url.replace("+","%2B")); //对+进行转译，避免oss出错
         appinfoLoadThread.start();
     }
 }
@@ -1377,6 +1406,25 @@ void Widget::on_webEngineView_loadFinished(bool arg1)
 
 void Widget::on_pushButton_update_clicked()
 {
-    QDesktopServices::openUrl(QUrl("https://www.deepinos.org/"));
+    QString feedbackSpk = "spk://store/chat/store.spark-app.feedback";
+    QFile actionSubmissionClientStatus("/opt/durapps/store.spark-app.feedback");
+    if (actionSubmissionClientStatus.exists())
+    {
+        qDebug() << "反馈器存在";
+        QProcess::startDetached("sh /opt/durapps/store.spark-app.feedback/launch.sh");
+    }
+    else{
+        qDebug() << "反馈器不存在，跳转页面";
+        openUrl(feedbackSpk);
+    }
+}
+
+void Widget::onGetUrl(const QString &url)
+{
+    if(url.left(6)=="spk://")
+    {
+        openUrl(QUrl(url));
+    }
+    activateWindow();
 }
 
