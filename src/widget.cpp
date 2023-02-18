@@ -232,12 +232,12 @@ void Widget::initUI()
         });
 
     // 载入自定义字体
-    int loadedFontID = QFontDatabase::addApplicationFont(":/fonts/fonts/hksnzt.ttf");
-    QStringList loadedFontFamilies = QFontDatabase::applicationFontFamilies(loadedFontID);
-    if(!loadedFontFamilies.isEmpty())
-    {
-        font = loadedFontFamilies.at(0);
-    }
+    // int loadedFontID = QFontDatabase::addApplicationFont(":/fonts/fonts/hksnzt.ttf");
+    // QStringList loadedFontFamilies = QFontDatabase::applicationFontFamilies(loadedFontID);
+    // if(!loadedFontFamilies.isEmpty())
+    // {
+    //     font = loadedFontFamilies.at(0);
+    // }
     /* 全局字体设置
      * DApplication::setFont(font);
      */
@@ -751,38 +751,51 @@ void Widget::searchApp(QString text)
         }
 
         //加载动画
-        spinner->show();
-        spinner->start();
+//        spinner->show();
+//        spinner->start();
 
-        // 关键字搜索处理
-        httpClient->get("https://search.deepinos.org.cn/appinfo/search")
-            .header("content-type", "application/json")
-            .queryParam("keyword", text)
-            .onResponse([this](QByteArray result)
-                        {
-            auto json = QJsonDocument::fromJson(result).array();
-            if (json.empty())
-            {
-                qDebug() << "相关应用未找到！";
-                sendNotification(tr("Relative apps Not Found!"));
-                mutex.unlock();
-                clearSearchApp();
-                spinner->stop();
-                spinner->hide();
-                ui->stackedWidget->setCurrentIndex(0);
-                ui->webEngineView->setUrl(QUrl("https://wayou.github.io/t-rex-runner"));
-                return;
-            }
-            clearSearchApp();
-            displaySearchApp(json); })
-            .onError([this](QString errorStr)
-                     {
-            qDebug()  << "请求出错：" << errorStr;
-            sendNotification(QString(tr("Request Error: %1")).arg(errorStr));
-            mutex.unlock();
-            return; })
-            .timeout(10 * 1000)
-            .exec();
+//        // 关键字搜索处理
+//        httpClient->get("https://search.deepinos.org.cn/appinfo/search")
+//            .header("content-type", "application/json")
+//            .queryParam("keyword", text)
+//            .onResponse([this](QByteArray result)
+//                        {
+//            auto json = QJsonDocument::fromJson(result).array();
+//            if (json.empty())
+//            {
+//                qDebug() << "相关应用未找到！";
+//                sendNotification(tr("Relative apps Not Found!"));
+//                mutex.unlock();
+//                clearSearchApp();
+//                spinner->stop();
+//                spinner->hide();
+//                ui->stackedWidget->setCurrentIndex(0);
+//                ui->webEngineView->setUrl(QUrl("https://wayou.github.io/t-rex-runner"));
+//                return;
+//            }
+//            clearSearchApp();
+//            displaySearchApp(json); })
+//            .onError([this](QString errorStr)
+//                     {
+//            qDebug()  << "请求出错：" << errorStr;
+//            sendNotification(QString(tr("Request Error: %1")).arg(errorStr));
+//            mutex.unlock();
+//            return; })
+//            .timeout(10 * 1000)
+//            .exec();
+
+        if (!themeIsDark){
+            ui->webEngineView->setUrl(serverUrl + "store/#/search?keywords=" + text);
+        }else{
+            ui->webEngineView->setUrl(serverUrl + "store/#/darksearch?keywords=" + text);
+        }
+        ui->stackedWidget->setCurrentIndex(0);
+//        spinner->stop();
+//        spinner->hide();
+        ui->stackedWidget->setCurrentIndex(0);
+        mutex.unlock();
+
+
     }
 }
 
@@ -1227,10 +1240,15 @@ void Widget::on_pushButton_clearWebCache_clicked()
 {
     QtConcurrent::run([=]()
                       {
-
         QString dataLocal = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
-        QDir cacheDir(dataLocal );
-        cacheDir.removeRecursively(); });
+        qDebug() << dataLocal;
+        QDir dataDir(dataLocal);
+        dataDir.removeRecursively();
+        dataLocal = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+        qDebug() << dataLocal;
+        QDir cacheDir(dataLocal);
+        cacheDir.removeRecursively();
+        });
 }
 
 quint64 Widget::dirFileSize(const QString &path)
